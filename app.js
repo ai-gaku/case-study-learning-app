@@ -6,17 +6,19 @@
   const configured = Boolean(cfg.SUPABASE_URL && cfg.SUPABASE_PUBLISHABLE_KEY);
   const db = configured && window.supabase ? window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_PUBLISHABLE_KEY) : null;
   const uuid = () => crypto.randomUUID();
-  const KEY = 'case-study-active-v2';
+  const KEY = 'case-study-active-v2'; // V2との互換性を維持
+  const PARTICIPANT_KEY = 'case-study-participant-code-v3';
   const demoKey = 'case-study-trial-v1';
   const types = new Set(['start','draft','hint_open','extra_open','final','transfer','reflection']);
   let current = window.CASES[0], sessionId = uuid(), userId = null, step = 1;
   let initial = '', final = '', transfer = '', reflection = '', activeText = '';
   let viewed = new Set(), extraShown = false, done = false;
+  let participantCode = '';
   let mode = 'demo', pending = Promise.resolve(), saveFailed = false, localFailed = false;
   let stateStorageEnabled = true;
   const byId = x => window.CASES.find(c => c.id === x);
   function status(msg, error=false){ const e=$('status'); if(e){e.textContent=msg;e.className='status'+(error?' error':'');} }
-  function localState(){return {schema:2,userId,caseId:current.id,caseVersion:current.version,sessionId,step,initial,final,transfer,reflection,activeText,viewed:[...viewed],extraShown,done,updatedAt:new Date().toISOString()};}
+  function localState(){return {schema:3,participantCode,userId,caseId:current.id,caseVersion:current.version,sessionId,step,initial,final,transfer,reflection,activeText,viewed:[...viewed],extraShown,done,updatedAt:new Date().toISOString()};}
   function cache(){
     if(!stateStorageEnabled) return;
     try{localStorage.setItem(KEY,JSON.stringify(localState()));localFailed=false;}
@@ -25,12 +27,14 @@
   function rememberInput(){const a=$('answer');if(a)activeText=a.value;cache();}
   function readCached(){try{return JSON.parse(localStorage.getItem(KEY)||'null');}catch{return null;}}
   function loadSaved(s){
+    participantCode=s.participantCode || participantCode;
+    $('participantCode').value=participantCode;
     current=byId(s.caseId);sessionId=s.sessionId;step=s.step;initial=s.initial||'';final=s.final||'';transfer=s.transfer||'';reflection=s.reflection||'';
     activeText=s.activeText||'';viewed=new Set((s.viewed||[]).filter(x=>typeof x==='string'));extraShown=Boolean(s.extraShown);done=Boolean(s.done);
   }
   function log(type,payload={}){
     if(!types.has(type))return;
-    const record={session_id:sessionId,case_id:current.id,case_version:current.version,event_type:type,payload};
+    const record={session_id:sessionId,case_id:current.id,case_version:current.version,event_type:type,payload:{...payload,participant_code:participantCode||null}};
     if(mode==='demo'){
       try{const arr=JSON.parse(localStorage.getItem(demoKey)||'[]');arr.push({...record,created_at:new Date().toISOString()});localStorage.setItem(demoKey,JSON.stringify(arr));}
       catch(e){saveFailed=true;status('デモ記録の保存に失敗しました。',true);}return;
@@ -81,6 +85,23 @@
     cache();render();
   }
   async function boot(){
+    try { participantCode = (localStorage.getItem(PARTICIPANT_KEY) || '').toUpperCase(); } catch {}
+    $('participantCode').value = participantCode;
+    $('applyParticipantCode').addEventListener('click', () => {
+      const nextCode = $('participantCode').value.trim().toUpperCase();
+      if(nextCode && !/^[A-Z0-9]{6,12}$/.test(nextCode)){
+        alert('研究用参加コードは半角英数字6～12文字で入力してください（空欄は試用モード）。');
+        $('participantCode').value=participantCode; return;
+      }
+      if(nextCode === participantCode){alert('現在のコードと同じです。');return;}
+      if(!confirm('参加コードを変更すると、現在の課題を終了して新しい取り組みを開始します。よろしいですか？')){
+        $('participantCode').value=participantCode;return;
+      }
+      participantCode=nextCode;
+      try{if(nextCode)localStorage.setItem(PARTICIPANT_KEY,nextCode);else localStorage.removeItem(PARTICIPANT_KEY);}catch{}
+      newSession(current);
+      alert(nextCode ? '参加コードを設定し、新しい取り組みを開始しました。' : '参加コードを解除して新しい取り組みを開始しました。');
+    });
     window.CASES.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.title;$('caseSelect').appendChild(o);});
     $('caseSelect').addEventListener('change',e=>{
       rememberInput();if(!confirm('別の事例で新しい取り組みを始めますか？ 現在の未完了の入力は、この画面から再開できなくなります。')){e.target.value=current.id;return;}
@@ -93,7 +114,9 @@
       }catch(e){console.error(e);$('mode').textContent='接続エラー';$('stage').innerHTML='<h2>データベースに接続できません</h2><p>設定を確認してください。回答は開始できません。</p>';return;}
     } else {$('mode').textContent='デモ（ブラウザ内保存）';}
     const saved=readCached();
-    if(saved&&saved.schema===2&&byId(saved.caseId)?.version===saved.caseVersion&&saved.userId===userId&&typeof saved.sessionId==='string'&&saved.step>=1&&saved.step<=5){
+    // 既存のV2の作業中セッションには研究用参加コードを後付けしない。
+    // V3の新規セッションからコードを紐付ける。
+    if(saved&&(saved.schema===2||saved.schema===3)&&byId(saved.caseId)?.version===saved.caseVersion&&saved.userId===userId&&typeof saved.sessionId==='string'&&saved.step>=1&&saved.step<=5){
       if(confirm(saved.done?'前回は課題を完了しています。前回の画面を表示しますか？（キャンセルすると新しい取り組みを開始）':'このブラウザに前回の入力途中の記録があります。続きを再開しますか？（キャンセルすると新しい取り組みを開始）')){
         loadSaved(saved);render();status(saved.done?'前回の完了画面を表示しています。':'前回の入力内容を復元しました。');return;
       }
