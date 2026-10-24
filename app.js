@@ -12,7 +12,7 @@
   const types = new Set(['start','draft','hint_open','extra_open','final','transfer','reflection']);
   let current = window.CASES[0], sessionId = uuid(), userId = null, step = 1;
   let initial = '', final = '', transfer = '', reflection = '', activeText = '', gapNote = '';
-  let viewed = new Set(), extraShown = false, done = false;
+  let viewed = new Set(), extraShown = false, done = false, feedbackOpen = false, nextFocus = ''; 
   let participantCode = '';
   let mode = 'demo', pending = Promise.resolve(), saveFailed = false, localFailed = false;
   let stateStorageEnabled = true;
@@ -20,7 +20,7 @@
   // 全角英数字→半角、英字→大文字。内部の空白や異なる文字は混同しない。
   function normalizeParticipantCode(value){return String(value ?? '').normalize('NFKC').trim().toUpperCase();}
   function status(msg, error=false){ const e=$('status'); if(e){e.textContent=msg;e.className='status'+(error?' error':'');} }
-  function localState(){return {schema:3,participantCode,userId,caseId:current.id,caseVersion:current.version,sessionId,step,initial,final,transfer,reflection,activeText,gapNote,viewed:[...viewed],extraShown,done,updatedAt:new Date().toISOString()};}
+  function localState(){return {schema:3,participantCode,userId,caseId:current.id,caseVersion:current.version,sessionId,step,initial,final,transfer,reflection,activeText,gapNote,viewed:[...viewed],extraShown,done,feedbackOpen,nextFocus,updatedAt:new Date().toISOString()};}
   function cache(){
     if(!stateStorageEnabled) return;
     try{localStorage.setItem(KEY,JSON.stringify(localState()));localFailed=false;}
@@ -32,7 +32,7 @@
     participantCode=normalizeParticipantCode(s.participantCode || participantCode);
     $('participantCode').value=participantCode;
     current=byId(s.caseId);sessionId=s.sessionId;step=s.step;initial=s.initial||'';final=s.final||'';transfer=s.transfer||'';reflection=s.reflection||'';
-    activeText=s.activeText||'';gapNote=s.gapNote||'';viewed=new Set((s.viewed||[]).filter(x=>typeof x==='string'));extraShown=Boolean(s.extraShown);done=Boolean(s.done);
+    activeText=s.activeText||'';gapNote=s.gapNote||'';viewed=new Set((s.viewed||[]).filter(x=>typeof x==='string'));extraShown=Boolean(s.extraShown);done=Boolean(s.done);feedbackOpen=Boolean(s.feedbackOpen);nextFocus=s.nextFocus||'';
   }
   async function verifyCode(code){
     if(!code || mode!=='database') return 'ok';
@@ -60,38 +60,67 @@
     });
   }
   function newSession(c){
-    current=c;sessionId=uuid();step=1;initial='';final='';transfer='';reflection='';activeText='';gapNote='';viewed=new Set();extraShown=false;done=false;saveFailed=false;cache();log('start',{});render();
+    current=c;sessionId=uuid();step=1;initial='';final='';transfer='';reflection='';activeText='';gapNote='';viewed=new Set();extraShown=false;done=false;feedbackOpen=false;nextFocus='';saveFailed=false;cache();log('start',{});render();
   }
   function label(){
     $('caseText').textContent=`${current.age}\n${current.description}`;$('caseSelect').value=current.id;
     for(let i=1;i<=5;i++)$('s'+i).classList.toggle('on',!done && i===step);
   }
+  const focusChoices = [
+    {id:'fact',label:'事実と推測を分けて考える'},
+    {id:'multiple',label:'背景の可能性を複数考える'},
+    {id:'information',label:'判断前に確認したい情報を具体化する'},
+    {id:'reason',label:'対応を選ぶ理由まで説明する'},
+    {id:'other',label:'まだ決めていない・その他'}
+  ];
+  const focusLabel=id=>(focusChoices.find(c=>c.id===id)||{label:'未選択'}).label;
+  function feedbackHtml(){
+    const explanation=current.feedback || {};
+    const history=[];
+    if(extraShown)history.push('追加の観察情報を確認しました。');
+    if(viewed.size)history.push(`考えるためのヒントを${viewed.size}種類確認しました。`);
+    if(!extraShown&&!viewed.size)history.push('追加の観察情報やヒントを開かずに考えました。');
+    return `<div class="feedback"><h3>事例の考え方（教員作成）</h3><p>${esc(explanation.main||'行動の背景を一つに決めつけず、本人・活動・環境に関する情報を確かめながら考えましょう。')}</p><h3>考える際に確認したい点</h3><ul>${(explanation.checks||[]).map(c=>`<li>${esc(c)}</li>`).join('')}</ul><p class="tip">これは唯一の模範解答ではありません。状況が異なれば適切な対応も変わります。</p><h3>今回の学習過程</h3><p>${esc(history.join(' '))}</p><p>初回回答・最終回答・別事例の回答を比べて、今後も活用したい考え方を確認してみましょう。</p><details><summary>自分の振り返りを確認</summary><div class="saved">${esc(reflection)}</div></details></div>`;
+  }
+  async function completeFeedback(){
+    if(!nextFocus){status('次に意識したいことを1つ選んでください。',true);return;}
+    log('reflection',{text:reflection,next_focus:nextFocus,next_focus_label:focusLabel(nextFocus)});
+    done=true;cache();render();status('学習記録を送信しています…');await pending;
+    status(saveFailed?'送信できなかった記録があります。教員に連絡してください。':mode==='demo'?'デモ記録をこのブラウザに保存しました。':'学習記録を送信しました。',saveFailed);
+  }
   function render(){
     label();let html='';
-    if(done){html='<h2>この事例は完了しています</h2><p>記録は各段階の確定時にSupabaseへ送信されています。新しい取り組みを始める場合は「新しい取り組み」を選んでください。</p><div class="btns"><button id="restart">新しい取り組みを始める</button></div>';}
-    else if(step===1){html=`<h2>1. まず自分の考えを残す</h2><p>${esc(current.prompts.initial)}</p><label for="answer">最初の回答</label><textarea id="answer" placeholder="今わかっている範囲で書いてください。">${esc(activeText)}</textarea><p class="tip">入力途中の文章はこのブラウザ内に自動保存されます。次へ進むとSupabaseにも記録します。</p><div class="btns"><button id="next" class="primary">最初の回答を保存して進む →</button></div>`;}
+    if(done){html=`<h2>この事例の学習が完了しました</h2><p>振り返りと「次に意識したいこと」を記録しました。</p><p class="tip">次に意識したいこと：${esc(focusLabel(nextFocus))}</p>${feedbackHtml()}<div class="btns"><button id="restart">新しい取り組みを始める</button></div>`;}
+    else if(step===1){html=`<h2>1. まず自分で考える</h2><p>${esc(current.prompts.initial)}</p><label for="answer">最初の回答</label><textarea id="answer" placeholder="今わかっている範囲で書いてください。">${esc(activeText)}</textarea><p class="tip">入力途中の文章は、この端末のブラウザに自動保存されます。「次へ」を押すと回答が送信されます。</p><div class="btns"><button id="next" class="primary">最初の回答を保存して進む →</button></div>`;}
     else if(step===2){
       html=`<h2>2. 追加情報と自分の判断を照らし合わせる</h2><p>最初の回答を見直し、必要なら情報やヒントを確認しましょう。ヒントを使わなくても進めます。利用による減点はありません。</p><div class="tip"><strong>最初の回答</strong><div class="saved">${esc(initial)}</div></div>`;
-      html+=`<div class="hint"><button id="extra">${extraShown?'追加の観察情報を再表示':'追加の観察情報を確認'}</button><div id="extraText">${extraShown?esc(current.extra):''}</div></div>`;
-      html+=`<div class="hint"><label for="gapNote"><strong>いま、まだ判断できないことは？（任意）</strong></label><p class="tip">最初の回答と追加情報を比べて「まだ分からないこと」「確かめたいこと」があれば、一言メモしてください。考えが変わらなくても構いません。ここに書いたことは、最終回答を保存する際に一緒に記録されます。</p><textarea id="gapNote" rows="3" placeholder="例：席を離れた直前の説明を本人が理解できたかは、まだ分からない。">${esc(gapNote)}</textarea></div>`;
-      html+='<h3>必要な場合は、考えるためのヒントを確認</h3>';
-      current.hints.forEach(h=>html+=`<div class="hint"><strong>${esc(h.title)}</strong><span class="tag">${esc(h.type)}</span><div class="btns"><button data-hint="${esc(h.id)}">${viewed.has(h.id)?'ヒントを再表示':'必要ならヒントを見る'}</button></div>${viewed.has(h.id)?`<p>${esc(h.text)}</p>`:''}</div>`);
+      html+=`<div class="hint"><button id="extra" type="button">${extraShown?'追加の観察情報：表示中（閉じるには下の見出しをタップ）':'追加の観察情報を確認する'}</button>${extraShown?`<details open><summary>追加の観察情報（開閉できます）</summary><p>${esc(current.extra)}</p></details>`:''}</div>`;
+      html+=`<div class="hint"><label for="gapNote"><strong>いま、まだ判断できないことは？（任意）</strong></label><p class="tip">追加情報と最初の回答を比べて、まだ確認したいことがあれば短くメモしてください。</p><textarea id="gapNote" rows="3">${esc(gapNote)}</textarea></div>`;
+      html+='<h3>考えるためのヒント（必要な場合だけ）</h3>';
+      current.hints.forEach(h=>html+=`<div class="hint"><strong>${esc(h.title)}</strong><span class="tag">${esc(h.type)}</span>${viewed.has(h.id)?`<details open><summary>ヒント：表示中（タップで閉じる）</summary><p>${esc(h.text)}</p></details>`:`<div class="btns"><button data-hint="${esc(h.id)}">必要ならヒントを見る</button></div>`}</div>`);
       html+='<div class="btns"><button id="back">← 戻る</button><button id="next" class="primary">最終回答へ →</button></div>';
     }
-    else if(step===3){html=`<h2>3. 自分で最終回答をまとめる</h2><p>${esc(current.prompts.final)}</p><p class="tip">判断を維持する場合も根拠を書いてください。</p><label for="answer">最終回答</label><textarea id="answer">${esc(activeText)}</textarea><div class="btns"><button id="back">← ヒントに戻る</button><button id="next" class="primary">最終回答を保存して進む →</button></div>`;}
-    else if(step===4){html=`<h2>4. 別の事例で考える</h2><p>学習用の思考ヒントは表示しません。</p><div class="story">${esc(current.transfer)}</div><label for="answer">別事例への回答</label><textarea id="answer">${esc(activeText)}</textarea><div class="btns"><button id="back">← 戻る</button><button id="next" class="primary">別事例の回答を保存して進む →</button></div>`;}
-    else if(step===5){html=`<h2>5. 振り返り</h2><p>最初と最後で考え方はどう変わりましたか。維持した場合はその理由を。次の課題で意識したいことも書いてください。</p><div class="tip"><strong>最初の回答</strong><div class="saved">${esc(initial)}</div><strong>最終回答</strong><div class="saved">${esc(final)}</div></div><label for="answer">振り返り</label><textarea id="answer">${esc(activeText)}</textarea><div class="btns"><button id="back">← 戻る</button><button id="next" class="primary">振り返りを保存して完了</button></div>`;}
+    else if(step===3){html=`<h2>3. もう一度考えてまとめる</h2><p>${esc(current.prompts.final)}</p><p class="tip">これまでの情報を必要に応じて見返せます。判断を変えない場合も根拠を書きましょう。</p><div class="review"><details open><summary>最初の自分の回答</summary><div class="saved">${esc(initial)}</div></details>${extraShown?`<details><summary>確認した追加の観察情報</summary><p>${esc(current.extra)}</p></details>`:''}${viewed.size?`<details><summary>利用したヒント（${viewed.size}件）</summary>${current.hints.filter(h=>viewed.has(h.id)).map(h=>`<p><strong>${esc(h.title)}</strong>：${esc(h.text)}</p>`).join('')}</details>`:''}${gapNote?`<details><summary>まだ判断できないことのメモ</summary><div class="saved">${esc(gapNote)}</div></details>`:''}</div><label for="answer">最終回答</label><textarea id="answer">${esc(activeText)}</textarea><div class="btns"><button id="back">← ヒントに戻る</button><button id="next" class="primary">最終回答を保存して進む →</button></div>`;}
+    else if(step===4){html=`<h2>4. 別の場面でも考えてみる</h2><p>ここまで、子どもの行動について情報を確かめながら考えてきました。次の事例では、<strong>同じ支援を当てはめるのではなく、「何が分かっていて、何を確認して判断するか」という考え方</strong>を使ってみましょう。</p><p class="tip">まだ分からないことがあっても構いません。学習用ヒントはここでは表示しません。</p><div class="story">${esc(current.transfer)}</div><label for="answer">別事例への回答</label><textarea id="answer">${esc(activeText)}</textarea><div class="btns"><button id="back">← 戻る</button><button id="next" class="primary">別事例の回答を保存して進む →</button></div>`;}
+    else if(step===5){
+      const compare=`<div class="review"><details open><summary>最初の回答</summary><div class="saved">${esc(initial)}</div></details><details open><summary>最終回答</summary><div class="saved">${esc(final)}</div></details><details><summary>別事例への回答</summary><div class="saved">${esc(transfer)}</div></details></div>`;
+      if(!feedbackOpen){html=`<h2>5. 回答を比べて振り返る</h2><p>最初と最後の回答を見比べ、<strong>何を新たに考えたか、あるいは判断を維持した理由</strong>を振り返りましょう。別事例で考えたことも参考にできます。</p>${compare}<label for="answer">振り返り</label><textarea id="answer">${esc(activeText)}</textarea><div class="btns"><button id="back">← 戻る</button><button id="next" class="primary">振り返りを確定して解説を見る →</button></div>`;}
+      else {html=`<h2>5. 解説とフィードバック</h2><p class="tip">ここからは教員が作成した解説と、閲覧履歴にもとづく振り返りです。自由記述の良し悪しを自動採点したものではありません。</p>${feedbackHtml()}<h3>次の事例で、特に意識したいことを1つ選びましょう</h3><p>次の学習に向けた自分の目標です。正解・不正解はありません。</p><div class="choices">${focusChoices.map(c=>`<label class="choice"><input type="radio" name="nextFocus" value="${c.id}" ${nextFocus===c.id?'checked':''}> ${esc(c.label)}</label>`).join('')}</div><div class="btns"><button id="backFeedback">← 振り返りを見直す</button><button id="complete" class="primary">選んで学習を完了する</button></div>`;}
+    }
     $('stage').innerHTML=html+'<p id="status" class="status" role="status"></p>';
     $('answer')?.addEventListener('input',rememberInput);
     $('gapNote')?.addEventListener('input', e => {gapNote=e.target.value;cache();});
     $('next')?.addEventListener('click',next);
     $('back')?.addEventListener('click',()=>{rememberInput();step--;activeText=step===1?initial:step===3?final:step===4?transfer:step===5?reflection:'';cache();render();});
     $('restart')?.addEventListener('click',()=>{if(confirm('同じ事例で新しい取り組みを開始しますか？'))newSession(current);});
-    $('extra')?.addEventListener('click',()=>{if(!extraShown){extraShown=true;log('extra_open',{extra_id:'observation'});}cache();render();});
+    $('extra')?.addEventListener('click',()=>{if(!extraShown){extraShown=true;log('extra_open',{extra_id:'observation'});cache();render();}else{const panel=document.querySelector('#stage .hint details');if(panel)panel.open=!panel.open;}});
     document.querySelectorAll('[data-hint]').forEach(btn=>btn.addEventListener('click',()=>{const key=btn.dataset.hint;if(!viewed.has(key)){viewed.add(key);log('hint_open',{hint_id:key});}cache();render();}));
+    document.querySelectorAll('input[name="nextFocus"]').forEach(r=>r.addEventListener('change',e=>{nextFocus=e.target.value;cache();}));
+    $('backFeedback')?.addEventListener('click',()=>{feedbackOpen=false;activeText=reflection;cache();render();});
+    $('complete')?.addEventListener('click',completeFeedback);
     if(localFailed)status('このブラウザ内への一時保存に失敗しています。',true);
     else if(saveFailed)status('Supabaseへの記録に失敗した履歴があります。担当者に連絡してください。',true);
-    else if(!done)status('入力途中はこのブラウザ内に自動保存します。段階を進むとデータベースへ記録します。');
+    else if(!done)status('入力途中の文章は、このブラウザに自動保存されます。回答を確定すると学習記録として送信されます。');
   }
   async function next(){
     const val=$('answer')?.value.trim();if(step!==2&&!val){status('回答を入力してください。',true);return;}
@@ -99,7 +128,7 @@
     else if(step===2){step=3;activeText=final;}
     else if(step===3){final=val;log('final',{text:val,reconsideration_note:gapNote});step=4;activeText=transfer;}
     else if(step===4){transfer=val;log('transfer',{text:val});step=5;activeText=reflection;}
-    else if(step===5){reflection=val;log('reflection',{text:val});done=true;activeText='';cache();render();status('Supabaseへの保存状態を確認しています…');await pending;status(saveFailed?'Supabaseに保存できなかった記録があります。教員へ連絡してください。':mode==='demo'?'このブラウザにデモ記録を保存しました。':'データベースへの保存を確認しました。',saveFailed);return;}
+    else if(step===5){reflection=val;feedbackOpen=true;activeText='';cache();render();return;}
     cache();render();
   }
   async function boot(){
