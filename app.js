@@ -34,6 +34,19 @@
     current=byId(s.caseId);sessionId=s.sessionId;step=s.step;initial=s.initial||'';final=s.final||'';transfer=s.transfer||'';reflection=s.reflection||'';
     activeText=s.activeText||'';viewed=new Set((s.viewed||[]).filter(x=>typeof x==='string'));extraShown=Boolean(s.extraShown);done=Boolean(s.done);
   }
+  async function verifyCode(code){
+    if(!code || mode!=='database') return 'ok';
+    const {data,error}=await db.rpc('claim_participant_code',{input_code:code});
+    if(error){console.error('参加コード照合エラー',error);return 'connection_error';}
+    return data;
+  }
+  function explainCodeResult(result){
+    return ({not_found:'この参加コードは発行済み一覧にありません。配布されたコードを確認してください。',
+      already_used:'このコードは別のブラウザ・利用者ですでに使われています。教員に確認してください。',
+      invalid_format:'半角英数字6～12文字で入力してください。',
+      not_authenticated:'Supabaseの認証ができていません。ページを再読み込みしてください。',
+      connection_error:'コードを確認できませんでした。ネットワークとSupabaseの設定を確認してください。'})[result] || '参加コードを確認できませんでした。';
+  }
   function log(type,payload={}){
     if(!types.has(type))return;
     const record={session_id:sessionId,case_id:current.id,case_version:current.version,event_type:type,payload:{...payload,participant_code:participantCode||null}};
@@ -89,21 +102,28 @@
   async function boot(){
     try { participantCode = normalizeParticipantCode(localStorage.getItem(PARTICIPANT_KEY) || ''); } catch {}
     $('participantCode').value = participantCode;
-    $('applyParticipantCode').addEventListener('click', () => {
-      const nextCode = normalizeParticipantCode($('participantCode').value);
-      $('participantCode').value = nextCode;
+    $('applyParticipantCode').addEventListener('click', async () => {
+      const button=$('applyParticipantCode');
+      if(button.disabled)return;
+      const nextCode=normalizeParticipantCode($('participantCode').value);
+      $('participantCode').value=nextCode;
       if(nextCode && !/^[A-Z0-9]{6,12}$/.test(nextCode)){
-        alert('研究用参加コードは英数字6～12文字で入力してください。全角英数字と小文字は自動変換します（空欄は試用モード）。');
-        $('participantCode').value=participantCode; return;
-      }
-      if(nextCode === participantCode){$('participantCode').value=participantCode;alert('現在のコードと同じです。');return;}
-      if(!confirm('参加コードを変更すると、現在の課題を終了して新しい取り組みを開始します。よろしいですか？')){
+        alert('研究用参加コードは半角英数字6～12文字で入力してください。小文字は大文字に変換されます。');
         $('participantCode').value=participantCode;return;
       }
-      participantCode=nextCode;
-      try{if(nextCode)localStorage.setItem(PARTICIPANT_KEY,nextCode);else localStorage.removeItem(PARTICIPANT_KEY);}catch{}
-      newSession(current);
-      alert(nextCode ? '参加コードを設定し、新しい取り組みを開始しました。' : '参加コードを解除して新しい取り組みを開始しました。');
+      if(nextCode===participantCode){alert('現在のコードと同じです。');return;}
+      button.disabled=true;button.textContent='コードを確認中…';
+      try{
+        const result=await verifyCode(nextCode);
+        if(result!=='ok'){alert(explainCodeResult(result));$('participantCode').value=participantCode;return;}
+        if(!confirm('参加コードを変更すると、現在の課題を終了して新しい取り組みを開始します。よろしいですか？')){
+          $('participantCode').value=participantCode;return;
+        }
+        participantCode=nextCode;
+        try{if(nextCode)localStorage.setItem(PARTICIPANT_KEY,nextCode);else localStorage.removeItem(PARTICIPANT_KEY);}catch{}
+        newSession(current);
+        alert(nextCode?'参加コードを確認して設定しました。':'コードを解除して新しい取り組みを開始しました。');
+      }finally{button.disabled=false;button.textContent='このコードを設定';}
     });
     window.CASES.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.title;$('caseSelect').appendChild(o);});
     $('caseSelect').addEventListener('change',e=>{
@@ -116,10 +136,21 @@
         userId=session.user.id;mode='database';$('mode').textContent='データベース接続';
       }catch(e){console.error(e);$('mode').textContent='接続エラー';$('stage').innerHTML='<h2>データベースに接続できません</h2><p>設定を確認してください。回答は開始できません。</p>';return;}
     } else {$('mode').textContent='デモ（ブラウザ内保存）';}
+    // 既存のブラウザ保存コードも毎回サーバーで検証し、失効・未登録なら外す。
+    if(participantCode && mode==='database'){
+      const outcome=await verifyCode(participantCode);
+      if(outcome!=='ok'){
+        const old=participantCode;participantCode='';$('participantCode').value='';
+        try{localStorage.removeItem(PARTICIPANT_KEY);}catch{}
+        // 過去の同コードの入力途中記録を誤って復元させない。
+        try{localStorage.removeItem(KEY);}catch{}
+        alert('保存済みコード '+old+' を確認できません。'+explainCodeResult(outcome)+' コードなしの新しい試用を開始します。');
+      }
+    }
     const saved=readCached();
     // 既存のV2の作業中セッションには研究用参加コードを後付けしない。
     // V3の新規セッションからコードを紐付ける。
-    if(saved&&(saved.schema===2||saved.schema===3)&&byId(saved.caseId)?.version===saved.caseVersion&&saved.userId===userId&&typeof saved.sessionId==='string'&&saved.step>=1&&saved.step<=5){
+    if(saved&&(saved.schema===2||saved.schema===3)&&normalizeParticipantCode(saved.participantCode||'')===participantCode&&byId(saved.caseId)?.version===saved.caseVersion&&saved.userId===userId&&typeof saved.sessionId==='string'&&saved.step>=1&&saved.step<=5){
       if(confirm(saved.done?'前回は課題を完了しています。前回の画面を表示しますか？（キャンセルすると新しい取り組みを開始）':'このブラウザに前回の入力途中の記録があります。続きを再開しますか？（キャンセルすると新しい取り組みを開始）')){
         loadSaved(saved);render();status(saved.done?'前回の完了画面を表示しています。':'前回の入力内容を復元しました。');return;
       }
