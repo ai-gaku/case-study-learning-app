@@ -11,7 +11,7 @@
   const demoKey = 'case-study-trial-v1';
   const types = new Set(['start','draft','hint_open','extra_open','final','transfer','reflection']);
   let current = window.CASES[0], sessionId = uuid(), userId = null, step = 1;
-  let initial = '', final = '', transfer = '', reflection = '', activeText = '';
+  let initial = '', final = '', transfer = '', reflection = '', activeText = '', gapNote = '';
   let viewed = new Set(), extraShown = false, done = false;
   let participantCode = '';
   let mode = 'demo', pending = Promise.resolve(), saveFailed = false, localFailed = false;
@@ -20,7 +20,7 @@
   // 全角英数字→半角、英字→大文字。内部の空白や異なる文字は混同しない。
   function normalizeParticipantCode(value){return String(value ?? '').normalize('NFKC').trim().toUpperCase();}
   function status(msg, error=false){ const e=$('status'); if(e){e.textContent=msg;e.className='status'+(error?' error':'');} }
-  function localState(){return {schema:3,participantCode,userId,caseId:current.id,caseVersion:current.version,sessionId,step,initial,final,transfer,reflection,activeText,viewed:[...viewed],extraShown,done,updatedAt:new Date().toISOString()};}
+  function localState(){return {schema:3,participantCode,userId,caseId:current.id,caseVersion:current.version,sessionId,step,initial,final,transfer,reflection,activeText,gapNote,viewed:[...viewed],extraShown,done,updatedAt:new Date().toISOString()};}
   function cache(){
     if(!stateStorageEnabled) return;
     try{localStorage.setItem(KEY,JSON.stringify(localState()));localFailed=false;}
@@ -32,7 +32,7 @@
     participantCode=normalizeParticipantCode(s.participantCode || participantCode);
     $('participantCode').value=participantCode;
     current=byId(s.caseId);sessionId=s.sessionId;step=s.step;initial=s.initial||'';final=s.final||'';transfer=s.transfer||'';reflection=s.reflection||'';
-    activeText=s.activeText||'';viewed=new Set((s.viewed||[]).filter(x=>typeof x==='string'));extraShown=Boolean(s.extraShown);done=Boolean(s.done);
+    activeText=s.activeText||'';gapNote=s.gapNote||'';viewed=new Set((s.viewed||[]).filter(x=>typeof x==='string'));extraShown=Boolean(s.extraShown);done=Boolean(s.done);
   }
   async function verifyCode(code){
     if(!code || mode!=='database') return 'ok';
@@ -60,7 +60,7 @@
     });
   }
   function newSession(c){
-    current=c;sessionId=uuid();step=1;initial='';final='';transfer='';reflection='';activeText='';viewed=new Set();extraShown=false;done=false;saveFailed=false;cache();log('start',{});render();
+    current=c;sessionId=uuid();step=1;initial='';final='';transfer='';reflection='';activeText='';gapNote='';viewed=new Set();extraShown=false;done=false;saveFailed=false;cache();log('start',{});render();
   }
   function label(){
     $('caseText').textContent=`${current.age}\n${current.description}`;$('caseSelect').value=current.id;
@@ -71,8 +71,10 @@
     if(done){html='<h2>この事例は完了しています</h2><p>記録は各段階の確定時にSupabaseへ送信されています。新しい取り組みを始める場合は「新しい取り組み」を選んでください。</p><div class="btns"><button id="restart">新しい取り組みを始める</button></div>';}
     else if(step===1){html=`<h2>1. まず自分の考えを残す</h2><p>${esc(current.prompts.initial)}</p><label for="answer">最初の回答</label><textarea id="answer" placeholder="今わかっている範囲で書いてください。">${esc(activeText)}</textarea><p class="tip">入力途中の文章はこのブラウザ内に自動保存されます。次へ進むとSupabaseにも記録します。</p><div class="btns"><button id="next" class="primary">最初の回答を保存して進む →</button></div>`;}
     else if(step===2){
-      html=`<h2>2. 必要な学習支援を選ぶ</h2><p>必要なものだけ開いてください。利用は減点しません。</p><div class="tip"><strong>最初の回答</strong><div class="saved">${esc(initial)}</div></div>`;
+      html=`<h2>2. 追加情報と自分の判断を照らし合わせる</h2><p>最初の回答を見直し、必要なら情報やヒントを確認しましょう。ヒントを使わなくても進めます。利用による減点はありません。</p><div class="tip"><strong>最初の回答</strong><div class="saved">${esc(initial)}</div></div>`;
       html+=`<div class="hint"><button id="extra">${extraShown?'追加の観察情報を再表示':'追加の観察情報を確認'}</button><div id="extraText">${extraShown?esc(current.extra):''}</div></div>`;
+      html+=`<div class="hint"><label for="gapNote"><strong>いま、まだ判断できないことは？（任意）</strong></label><p class="tip">最初の回答と追加情報を比べて「まだ分からないこと」「確かめたいこと」があれば、一言メモしてください。考えが変わらなくても構いません。ここに書いたことは、最終回答を保存する際に一緒に記録されます。</p><textarea id="gapNote" rows="3" placeholder="例：席を離れた直前の説明を本人が理解できたかは、まだ分からない。">${esc(gapNote)}</textarea></div>`;
+      html+='<h3>必要な場合は、考えるためのヒントを確認</h3>';
       current.hints.forEach(h=>html+=`<div class="hint"><strong>${esc(h.title)}</strong><span class="tag">${esc(h.type)}</span><div class="btns"><button data-hint="${esc(h.id)}">${viewed.has(h.id)?'ヒントを再表示':'必要ならヒントを見る'}</button></div>${viewed.has(h.id)?`<p>${esc(h.text)}</p>`:''}</div>`);
       html+='<div class="btns"><button id="back">← 戻る</button><button id="next" class="primary">最終回答へ →</button></div>';
     }
@@ -81,6 +83,7 @@
     else if(step===5){html=`<h2>5. 振り返り</h2><p>最初と最後で考え方はどう変わりましたか。維持した場合はその理由を。次の課題で意識したいことも書いてください。</p><div class="tip"><strong>最初の回答</strong><div class="saved">${esc(initial)}</div><strong>最終回答</strong><div class="saved">${esc(final)}</div></div><label for="answer">振り返り</label><textarea id="answer">${esc(activeText)}</textarea><div class="btns"><button id="back">← 戻る</button><button id="next" class="primary">振り返りを保存して完了</button></div>`;}
     $('stage').innerHTML=html+'<p id="status" class="status" role="status"></p>';
     $('answer')?.addEventListener('input',rememberInput);
+    $('gapNote')?.addEventListener('input', e => {gapNote=e.target.value;cache();});
     $('next')?.addEventListener('click',next);
     $('back')?.addEventListener('click',()=>{rememberInput();step--;activeText=step===1?initial:step===3?final:step===4?transfer:step===5?reflection:'';cache();render();});
     $('restart')?.addEventListener('click',()=>{if(confirm('同じ事例で新しい取り組みを開始しますか？'))newSession(current);});
@@ -94,7 +97,7 @@
     const val=$('answer')?.value.trim();if(step!==2&&!val){status('回答を入力してください。',true);return;}
     if(step===1){initial=val;log('draft',{text:val});step=2;activeText='';}
     else if(step===2){step=3;activeText=final;}
-    else if(step===3){final=val;log('final',{text:val});step=4;activeText=transfer;}
+    else if(step===3){final=val;log('final',{text:val,reconsideration_note:gapNote});step=4;activeText=transfer;}
     else if(step===4){transfer=val;log('transfer',{text:val});step=5;activeText=reflection;}
     else if(step===5){reflection=val;log('reflection',{text:val});done=true;activeText='';cache();render();status('Supabaseへの保存状態を確認しています…');await pending;status(saveFailed?'Supabaseに保存できなかった記録があります。教員へ連絡してください。':mode==='demo'?'このブラウザにデモ記録を保存しました。':'データベースへの保存を確認しました。',saveFailed);return;}
     cache();render();
