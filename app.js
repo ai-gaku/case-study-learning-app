@@ -2,92 +2,102 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const config = window.APP_CONFIG || {};
-  const configured = Boolean(config.SUPABASE_URL && config.SUPABASE_PUBLISHABLE_KEY);
-  const db = configured && window.supabase ? window.supabase.createClient(config.SUPABASE_URL, config.SUPABASE_PUBLISHABLE_KEY) : null;
-  const id = () => crypto.randomUUID();
-  let current = window.CASES[0];
-  let sessionId = id();
-  let step = 1, initial = '', final = '', transfer = '', reflection = '', viewed = new Set(), extraShown = false;
-  let pending = Promise.resolve();
-  let saveFailed = false;
-  let mode = 'demo';
+  const cfg = window.APP_CONFIG || {};
+  const configured = Boolean(cfg.SUPABASE_URL && cfg.SUPABASE_PUBLISHABLE_KEY);
+  const db = configured && window.supabase ? window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_PUBLISHABLE_KEY) : null;
+  const uuid = () => crypto.randomUUID();
+  const KEY = 'case-study-active-v2';
   const demoKey = 'case-study-trial-v1';
-  function status(message, error=false){ const el=$('status'); if(el){el.textContent=message;el.className='status'+(error?' error':'');} }
-  const eventTypes = new Set(['start','draft','hint_open','extra_open','final','transfer','reflection']);
-  function log(type, payload={}){
-    if(!eventTypes.has(type)) return;
-    const record = {session_id:sessionId,case_id:current.id,case_version:current.version,event_type:type,payload};
-    if(mode === 'demo') {
-      const items=JSON.parse(localStorage.getItem(demoKey)||'[]'); items.push({...record,created_at:new Date().toISOString()});
-      localStorage.setItem(demoKey,JSON.stringify(items));return;
+  const types = new Set(['start','draft','hint_open','extra_open','final','transfer','reflection']);
+  let current = window.CASES[0], sessionId = uuid(), userId = null, step = 1;
+  let initial = '', final = '', transfer = '', reflection = '', activeText = '';
+  let viewed = new Set(), extraShown = false, done = false;
+  let mode = 'demo', pending = Promise.resolve(), saveFailed = false, localFailed = false;
+  let stateStorageEnabled = true;
+  const byId = x => window.CASES.find(c => c.id === x);
+  function status(msg, error=false){ const e=$('status'); if(e){e.textContent=msg;e.className='status'+(error?' error':'');} }
+  function localState(){return {schema:2,userId,caseId:current.id,caseVersion:current.version,sessionId,step,initial,final,transfer,reflection,activeText,viewed:[...viewed],extraShown,done,updatedAt:new Date().toISOString()};}
+  function cache(){
+    if(!stateStorageEnabled) return;
+    try{localStorage.setItem(KEY,JSON.stringify(localState()));localFailed=false;}
+    catch(e){localFailed=true;console.warn('ブラウザ内一時保存に失敗',e);status('このブラウザ内への一時保存に失敗しました。空き容量やブラウザ設定を確認してください。',true);}
+  }
+  function rememberInput(){const a=$('answer');if(a)activeText=a.value;cache();}
+  function readCached(){try{return JSON.parse(localStorage.getItem(KEY)||'null');}catch{return null;}}
+  function loadSaved(s){
+    current=byId(s.caseId);sessionId=s.sessionId;step=s.step;initial=s.initial||'';final=s.final||'';transfer=s.transfer||'';reflection=s.reflection||'';
+    activeText=s.activeText||'';viewed=new Set((s.viewed||[]).filter(x=>typeof x==='string'));extraShown=Boolean(s.extraShown);done=Boolean(s.done);
+  }
+  function log(type,payload={}){
+    if(!types.has(type))return;
+    const record={session_id:sessionId,case_id:current.id,case_version:current.version,event_type:type,payload};
+    if(mode==='demo'){
+      try{const arr=JSON.parse(localStorage.getItem(demoKey)||'[]');arr.push({...record,created_at:new Date().toISOString()});localStorage.setItem(demoKey,JSON.stringify(arr));}
+      catch(e){saveFailed=true;status('デモ記録の保存に失敗しました。',true);}return;
     }
-    // 非同期保存は順番を保持し、失敗時に「保存できた」と表示しない。
-    pending=pending.then(async()=>{
-      const {error}=await db.from('learning_events').insert(record);
-      if(error) throw error;
-    }).catch(e=>{
-      saveFailed=true;
-      console.error('データ保存エラー',e);
-      status('保存に失敗しました。通信・Supabase設定を確認し、教員へ知らせてください。',true);
+    pending=pending.then(async()=>{const {error}=await db.from('learning_events').insert(record);if(error)throw error;}).catch(e=>{
+      saveFailed=true;console.error('Supabaseへの保存失敗',e);
+      status('Supabaseへの記録に失敗しました。この端末の一時保存が残っている可能性があります。教員に連絡してください。',true);
     });
   }
-  function newSession(caseObject){
-    current=caseObject;sessionId=id();step=1;saveFailed=false;initial='';final='';transfer='';reflection='';viewed=new Set();extraShown=false;
-    log('start',{});render();
+  function newSession(c){
+    current=c;sessionId=uuid();step=1;initial='';final='';transfer='';reflection='';activeText='';viewed=new Set();extraShown=false;done=false;saveFailed=false;cache();log('start',{});render();
+  }
+  function label(){
+    $('caseText').textContent=`${current.age}\n${current.description}`;$('caseSelect').value=current.id;
+    for(let i=1;i<=5;i++)$('s'+i).classList.toggle('on',!done && i===step);
   }
   function render(){
-    $('caseText').textContent = `${current.age}\n${current.description}`;
-    $('caseSelect').value=current.id;
-    for(let i=1;i<=5;i++)$('s'+i).classList.toggle('on',i===step);
-    let html='';
-    if(step===1)html=`<h2>1. まず自分の考えを残す</h2><p>${esc(current.prompts.initial)}</p><label for="answer">最初の回答</label><textarea id="answer" placeholder="今わかっている範囲で書いてください。ここで正解を出す必要はありません。">${esc(initial)}</textarea><p class="tip">最初の考えは後の回答と比較するために保存します。<strong>回答を入力してから</strong>次に進んでください。</p><div class="btns"><button id="next" class="primary">最初の回答を保存して進む →</button></div>`;
-    if(step===2){
-      html=`<h2>2. 必要な学習支援を選ぶ</h2><p>ヒントは必要なものだけ開いてください。使わずに進むこともできます。<strong>ヒントの利用自体は減点しません。</strong></p>`;
-      html+=`<div class="tip"><strong>最初の回答</strong><div class="saved">${esc(initial)}</div></div>`;
+    label();let html='';
+    if(done){html='<h2>この事例は完了しています</h2><p>記録は各段階の確定時にSupabaseへ送信されています。新しい取り組みを始める場合は「新しい取り組み」を選んでください。</p><div class="btns"><button id="restart">新しい取り組みを始める</button></div>';}
+    else if(step===1){html=`<h2>1. まず自分の考えを残す</h2><p>${esc(current.prompts.initial)}</p><label for="answer">最初の回答</label><textarea id="answer" placeholder="今わかっている範囲で書いてください。">${esc(activeText)}</textarea><p class="tip">入力途中の文章はこのブラウザ内に自動保存されます。次へ進むとSupabaseにも記録します。</p><div class="btns"><button id="next" class="primary">最初の回答を保存して進む →</button></div>`;}
+    else if(step===2){
+      html=`<h2>2. 必要な学習支援を選ぶ</h2><p>必要なものだけ開いてください。利用は減点しません。</p><div class="tip"><strong>最初の回答</strong><div class="saved">${esc(initial)}</div></div>`;
       html+=`<div class="hint"><button id="extra">${extraShown?'追加の観察情報を再表示':'追加の観察情報を確認'}</button><div id="extraText">${extraShown?esc(current.extra):''}</div></div>`;
-      current.hints.forEach((h,i)=>html+=`<div class="hint"><strong>${esc(h.title)}</strong><span class="tag">${esc(h.type)}</span><div class="btns"><button data-hint="${esc(h.id)}">${viewed.has(h.id)?'ヒントを再表示':'必要ならヒントを見る'}</button></div>${viewed.has(h.id)?`<p>${esc(h.text)}</p>`:''}</div>`);
-      html+=`<div class="btns"><button id="back">← 戻る</button><button id="next" class="primary">最終回答へ →</button></div>`;
+      current.hints.forEach(h=>html+=`<div class="hint"><strong>${esc(h.title)}</strong><span class="tag">${esc(h.type)}</span><div class="btns"><button data-hint="${esc(h.id)}">${viewed.has(h.id)?'ヒントを再表示':'必要ならヒントを見る'}</button></div>${viewed.has(h.id)?`<p>${esc(h.text)}</p>`:''}</div>`);
+      html+='<div class="btns"><button id="back">← 戻る</button><button id="next" class="primary">最終回答へ →</button></div>';
     }
-    if(step===3)html=`<h2>3. 自分で最終回答をまとめる</h2><p>${esc(current.prompts.final)}</p><p class="tip">初回の回答を参考にしてもかまいません。考えを変更しない場合も、根拠を書いてください。</p><label for="answer">最終回答</label><textarea id="answer" placeholder="事実・推測・確認したいこと・検討する対応を整理しましょう。">${esc(final)}</textarea><div class="btns"><button id="back">← ヒントに戻る</button><button id="next" class="primary">最終回答を保存して進む →</button></div>`;
-    if(step===4)html=`<h2>4. 別の事例で考える</h2><p>ここでは、学習用の思考ヒントは表示しません。無理なく書ける範囲で回答してください。</p><div class="story">${esc(current.transfer)}</div><label for="answer">別事例への回答</label><textarea id="answer">${esc(transfer)}</textarea><div class="btns"><button id="back">← 戻る</button><button id="next" class="primary">別事例の回答を保存して進む →</button></div>`;
-    if(step===5)html=`<h2>5. 振り返り</h2><p>最初と最後で、考え方はどう変わりましたか。変わらなかった場合は、その理由を書いてください。また、次の課題で意識したいことを一つ書いてください。</p><div class="tip"><strong>最初の回答</strong><div class="saved">${esc(initial)}</div><strong>最終回答</strong><div class="saved">${esc(final)}</div></div><label for="answer">振り返り</label><textarea id="answer">${esc(reflection)}</textarea><div class="btns"><button id="back">← 戻る</button><button id="next" class="primary">振り返りを保存して完了</button></div>`;
+    else if(step===3){html=`<h2>3. 自分で最終回答をまとめる</h2><p>${esc(current.prompts.final)}</p><p class="tip">判断を維持する場合も根拠を書いてください。</p><label for="answer">最終回答</label><textarea id="answer">${esc(activeText)}</textarea><div class="btns"><button id="back">← ヒントに戻る</button><button id="next" class="primary">最終回答を保存して進む →</button></div>`;}
+    else if(step===4){html=`<h2>4. 別の事例で考える</h2><p>学習用の思考ヒントは表示しません。</p><div class="story">${esc(current.transfer)}</div><label for="answer">別事例への回答</label><textarea id="answer">${esc(activeText)}</textarea><div class="btns"><button id="back">← 戻る</button><button id="next" class="primary">別事例の回答を保存して進む →</button></div>`;}
+    else if(step===5){html=`<h2>5. 振り返り</h2><p>最初と最後で考え方はどう変わりましたか。維持した場合はその理由を。次の課題で意識したいことも書いてください。</p><div class="tip"><strong>最初の回答</strong><div class="saved">${esc(initial)}</div><strong>最終回答</strong><div class="saved">${esc(final)}</div></div><label for="answer">振り返り</label><textarea id="answer">${esc(activeText)}</textarea><div class="btns"><button id="back">← 戻る</button><button id="next" class="primary">振り返りを保存して完了</button></div>`;}
     $('stage').innerHTML=html+'<p id="status" class="status" role="status"></p>';
+    $('answer')?.addEventListener('input',rememberInput);
     $('next')?.addEventListener('click',next);
-    $('back')?.addEventListener('click',()=>{step--;render();});
-    $('extra')?.addEventListener('click',()=>{
-      if(!extraShown){extraShown=true;log('extra_open',{extra_id:'observation'});}
-      render();
-    });
-    document.querySelectorAll('[data-hint]').forEach(btn=>btn.addEventListener('click',()=>{
-      const hintId=btn.dataset.hint;
-      if(!viewed.has(hintId)){viewed.add(hintId);log('hint_open',{hint_id:hintId});}
-      render();
-    }));
+    $('back')?.addEventListener('click',()=>{rememberInput();step--;activeText=step===1?initial:step===3?final:step===4?transfer:step===5?reflection:'';cache();render();});
+    $('restart')?.addEventListener('click',()=>{if(confirm('同じ事例で新しい取り組みを開始しますか？'))newSession(current);});
+    $('extra')?.addEventListener('click',()=>{if(!extraShown){extraShown=true;log('extra_open',{extra_id:'observation'});}cache();render();});
+    document.querySelectorAll('[data-hint]').forEach(btn=>btn.addEventListener('click',()=>{const key=btn.dataset.hint;if(!viewed.has(key)){viewed.add(key);log('hint_open',{hint_id:key});}cache();render();}));
+    if(localFailed)status('このブラウザ内への一時保存に失敗しています。',true);
+    else if(saveFailed)status('Supabaseへの記録に失敗した履歴があります。担当者に連絡してください。',true);
+    else if(!done)status('入力途中はこのブラウザ内に自動保存します。段階を進むとデータベースへ記録します。');
   }
   async function next(){
-    const value=$('answer')?.value.trim();
-    if(step!==2 && !value){status('回答を入力してください。',true);return;}
-    if(step===1){initial=value;log('draft',{text:value});step=2;}
-    else if(step===2)step=3;
-    else if(step===3){final=value;log('final',{text:value});step=4;}
-    else if(step===4){transfer=value;log('transfer',{text:value});step=5;}
-    else if(step===5){reflection=value;log('reflection',{text:value});$('stage').innerHTML='<h2>完了しました</h2><p>ご協力ありがとうございました。今回の記録を次の課題の学習につなげます。</p><p id="status" class="status" role="status">保存状態を確認しています…</p>';await pending;if(saveFailed){status('一部の保存に失敗しました。教員にお知らせください。',true);}else{status(mode==='demo'?'この端末のブラウザにデモ記録を仮保存しました。':'データベースへの保存を確認しました。');}return;}
-    render();
+    const val=$('answer')?.value.trim();if(step!==2&&!val){status('回答を入力してください。',true);return;}
+    if(step===1){initial=val;log('draft',{text:val});step=2;activeText='';}
+    else if(step===2){step=3;activeText=final;}
+    else if(step===3){final=val;log('final',{text:val});step=4;activeText=transfer;}
+    else if(step===4){transfer=val;log('transfer',{text:val});step=5;activeText=reflection;}
+    else if(step===5){reflection=val;log('reflection',{text:val});done=true;activeText='';cache();render();status('Supabaseへの保存状態を確認しています…');await pending;status(saveFailed?'Supabaseに保存できなかった記録があります。教員へ連絡してください。':mode==='demo'?'このブラウザにデモ記録を保存しました。':'データベースへの保存を確認しました。',saveFailed);return;}
+    cache();render();
   }
   async function boot(){
-    window.CASES.forEach(c=>{const opt=document.createElement('option');opt.value=c.id;opt.textContent=c.title;$('caseSelect').appendChild(opt);});
+    window.CASES.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.title;$('caseSelect').appendChild(o);});
     $('caseSelect').addEventListener('change',e=>{
-      if(!confirm('別の事例に切り替えると、この画面で入力途中の内容は引き継がれません。切り替えますか？')){e.target.value=current.id;return;}
-      newSession(window.CASES.find(c=>c.id===e.target.value));
+      rememberInput();if(!confirm('別の事例で新しい取り組みを始めますか？ 現在の未完了の入力は、この画面から再開できなくなります。')){e.target.value=current.id;return;}
+      newSession(byId(e.target.value));
     });
     if(db){
-      try{
-        let {data:{session},error:e}=await db.auth.getSession(); if(e)throw e;
-        if(!session){const r=await db.auth.signInAnonymously();if(r.error)throw r.error;}
-        mode='database';$('mode').textContent='データベース接続';
-      }catch(e){console.error(e);$('mode').textContent='接続エラー';$('stage').innerHTML='<h2>データベースに接続できません</h2><p>設定を確認してください。回答を始めることはできません。</p>';return;}
-    }else{$('mode').textContent='デモ（ブラウザ内保存）';}
+      try{let {data:{session},error}=await db.auth.getSession();if(error)throw error;
+        if(!session){const result=await db.auth.signInAnonymously();if(result.error)throw result.error;session=result.data.session;}
+        userId=session.user.id;mode='database';$('mode').textContent='データベース接続';
+      }catch(e){console.error(e);$('mode').textContent='接続エラー';$('stage').innerHTML='<h2>データベースに接続できません</h2><p>設定を確認してください。回答は開始できません。</p>';return;}
+    } else {$('mode').textContent='デモ（ブラウザ内保存）';}
+    const saved=readCached();
+    if(saved&&saved.schema===2&&byId(saved.caseId)?.version===saved.caseVersion&&saved.userId===userId&&typeof saved.sessionId==='string'&&saved.step>=1&&saved.step<=5){
+      if(confirm(saved.done?'前回は課題を完了しています。前回の画面を表示しますか？（キャンセルすると新しい取り組みを開始）':'このブラウザに前回の入力途中の記録があります。続きを再開しますか？（キャンセルすると新しい取り組みを開始）')){
+        loadSaved(saved);render();status(saved.done?'前回の完了画面を表示しています。':'前回の入力内容を復元しました。');return;
+      }
+    }
     newSession(current);
   }
   boot();
