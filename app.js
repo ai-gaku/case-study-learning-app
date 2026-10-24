@@ -17,6 +17,8 @@
   let mode = 'demo', pending = Promise.resolve(), saveFailed = false, localFailed = false;
   let stateStorageEnabled = true;
   const byId = x => window.CASES.find(c => c.id === x);
+  // 全角英数字→半角、英字→大文字。内部の空白や異なる文字は混同しない。
+  function normalizeParticipantCode(value){return String(value ?? '').normalize('NFKC').trim().toUpperCase();}
   function status(msg, error=false){ const e=$('status'); if(e){e.textContent=msg;e.className='status'+(error?' error':'');} }
   function localState(){return {schema:3,participantCode,userId,caseId:current.id,caseVersion:current.version,sessionId,step,initial,final,transfer,reflection,activeText,viewed:[...viewed],extraShown,done,updatedAt:new Date().toISOString()};}
   function cache(){
@@ -27,7 +29,7 @@
   function rememberInput(){const a=$('answer');if(a)activeText=a.value;cache();}
   function readCached(){try{return JSON.parse(localStorage.getItem(KEY)||'null');}catch{return null;}}
   function loadSaved(s){
-    participantCode=s.participantCode || participantCode;
+    participantCode=normalizeParticipantCode(s.participantCode || participantCode);
     $('participantCode').value=participantCode;
     current=byId(s.caseId);sessionId=s.sessionId;step=s.step;initial=s.initial||'';final=s.final||'';transfer=s.transfer||'';reflection=s.reflection||'';
     activeText=s.activeText||'';viewed=new Set((s.viewed||[]).filter(x=>typeof x==='string'));extraShown=Boolean(s.extraShown);done=Boolean(s.done);
@@ -85,15 +87,16 @@
     cache();render();
   }
   async function boot(){
-    try { participantCode = (localStorage.getItem(PARTICIPANT_KEY) || '').toUpperCase(); } catch {}
+    try { participantCode = normalizeParticipantCode(localStorage.getItem(PARTICIPANT_KEY) || ''); } catch {}
     $('participantCode').value = participantCode;
     $('applyParticipantCode').addEventListener('click', () => {
-      const nextCode = $('participantCode').value.trim().toUpperCase();
+      const nextCode = normalizeParticipantCode($('participantCode').value);
+      $('participantCode').value = nextCode;
       if(nextCode && !/^[A-Z0-9]{6,12}$/.test(nextCode)){
-        alert('研究用参加コードは半角英数字6～12文字で入力してください（空欄は試用モード）。');
+        alert('研究用参加コードは英数字6～12文字で入力してください。全角英数字と小文字は自動変換します（空欄は試用モード）。');
         $('participantCode').value=participantCode; return;
       }
-      if(nextCode === participantCode){alert('現在のコードと同じです。');return;}
+      if(nextCode === participantCode){$('participantCode').value=participantCode;alert('現在のコードと同じです。');return;}
       if(!confirm('参加コードを変更すると、現在の課題を終了して新しい取り組みを開始します。よろしいですか？')){
         $('participantCode').value=participantCode;return;
       }
