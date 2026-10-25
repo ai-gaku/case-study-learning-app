@@ -6,7 +6,7 @@
   const configured = Boolean(cfg.SUPABASE_URL && cfg.SUPABASE_PUBLISHABLE_KEY);
   const db = configured && window.supabase ? window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_PUBLISHABLE_KEY) : null;
   const uuid = () => crypto.randomUUID();
-  const KEY = 'case-study-active-v9'; // 旧版とは学習段階が異なるため分離
+  const KEY = 'case-study-active-v10'; // 旧版とは学習段階が異なるため分離
   const PARTICIPANT_KEY = 'case-study-participant-code-v3';
   const demoKey = 'case-study-trial-v1';
   const types = new Set(['start','draft','hint_open','extra_open','final','transfer','reflection']);
@@ -16,11 +16,12 @@
   let participantCode = '';
   let mode = 'demo', pending = Promise.resolve(), saveFailed = false, localFailed = false;
   let stateStorageEnabled = true;
+  let view = 'home';
   const byId = x => window.CASES.find(c => c.id === x);
   // 全角英数字→半角、英字→大文字。内部の空白や異なる文字は混同しない。
   function normalizeParticipantCode(value){return String(value ?? '').normalize('NFKC').trim().toUpperCase();}
   function status(msg, error=false){ const e=$('status'); if(e){e.textContent=msg;e.className='status'+(error?' error':'');} }
-  function localState(){return {schema:9,transferCheck,participantCode,userId,caseId:current.id,caseVersion:current.version,sessionId,step,initial,final,transfer,reflection,activeText,gapNote,viewed:[...viewed],extraShown,done,feedbackOpen,nextFocus,updatedAt:new Date().toISOString()};}
+  function localState(){return {schema:10,transferCheck,participantCode,userId,caseId:current.id,caseVersion:current.version,sessionId,step,initial,final,transfer,reflection,activeText,gapNote,viewed:[...viewed],extraShown,done,feedbackOpen,nextFocus,updatedAt:new Date().toISOString()};}
   function cache(){
     if(!stateStorageEnabled) return;
     try{localStorage.setItem(KEY,JSON.stringify(localState()));localFailed=false;}
@@ -60,7 +61,7 @@
     });
   }
   function newSession(c){
-    current=c;sessionId=uuid();step=1;initial='';final='';transfer='';reflection='';activeText='';gapNote='';transferCheck='';viewed=new Set();extraShown=false;done=false;feedbackOpen=false;nextFocus='';saveFailed=false;cache();log('start',{});render();
+    view='learning';showView();current=c;sessionId=uuid();step=1;initial='';final='';transfer='';reflection='';activeText='';gapNote='';transferCheck='';viewed=new Set();extraShown=false;done=false;feedbackOpen=false;nextFocus='';saveFailed=false;cache();log('start',{});render();
   }
   const focusChoices=[
     {id:'fact',label:'事実と推測を分けて考える'},
@@ -73,8 +74,22 @@
   function label(){
     $('caseText').textContent=`${current.age}\n${current.description}`;
     $('caseSelect').value=current.id;
+    $('learningCaseTitle').textContent=current.title;
+    $('learningCaseText').textContent=`${current.age}\n${current.description}`;
     for(let i=1;i<=6;i++)$('s'+i).classList.toggle('on',!done && i===step);
+    $('progressText').textContent=done?'学習完了':`STEP ${step} / 6`;
+    $('progressBar').style.width=(done?100:Math.round(step/6*100))+'%';
   }
+  function showView(){
+    $('home').hidden=view!=='home';
+    $('learning').hidden=view!=='learning';
+    if(view==='home'){
+      $('caseSelect').value=current.id;
+      $('caseText').textContent=`${current.age}\n${current.description}`;
+      $('participantCode').value=participantCode;
+    }
+  }
+  function showHome(){view='home';showView();}
   function feedbackHtml(){
     const f=current.feedback||{}, notes=[];
     notes.push('追加の観察情報を確認しました。');
@@ -85,9 +100,9 @@
   const response = (title,content,open=false)=>`<details ${open?'open':''}><summary>${esc(title)}</summary><div class="saved">${esc(content||'（入力なし）')}</div></details>`;
   const focusOptions=()=>`<div class="choices">${focusChoices.map(c=>`<label class="choice"><input type="radio" name="nextFocus" value="${c.id}" ${nextFocus===c.id?'checked':''}>${esc(c.label)}</label>`).join('')}</div>`;
   function render(){
-    label();let html='';
+    view='learning';showView();label();let html='';
     if(done){
-      html=`<h2>学習が完了しました</h2><p>今回選んだ視点：<strong>${esc(focusLabel(nextFocus))}</strong></p><p>別事例での自己確認：<strong>${esc(({yes:'意識して考えることができた',partly:'意識したが、十分には考えられなかった',no:'考えるときに忘れていた・難しかった'})[transferCheck]||'未回答')}</strong></p><details><summary>別事例について考える手がかりを確認する</summary><p>${esc(current.transferFeedback||'本人・活動・環境について確認することを考えましょう。')}</p></details><div class="btns"><button id="restart">新しい取り組みを始める</button></div>`;
+      html=`<div class="finish-icon" aria-hidden="true">✓</div><p class="eyebrow center">CASE COMPLETE</p><h2 class="center">この事例の学習が完了しました</h2><p class="center">最初の判断から情報の確認、考え直し、別事例への応用まで取り組みました。</p><p>今回選んだ視点：<strong>${esc(focusLabel(nextFocus))}</strong></p><p>別事例での自己確認：<strong>${esc(({yes:'意識して考えることができた',partly:'意識したが、十分には考えられなかった',no:'考えるときに忘れていた・難しかった'})[transferCheck]||'未回答')}</strong></p><details><summary>別事例について考える手がかりを確認する</summary><p>${esc(current.transferFeedback||'本人・活動・環境について確認することを考えましょう。')}</p></details><div class="btns"><button id="backHome" class="primary">事例選択に戻る →</button><button id="restart">同じ事例にもう一度取り組む</button></div>`;
     }else if(step===1){
       html=`<h2>1. まず自分で考える</h2><p>${esc(current.prompts.initial)}</p><label for="answer">最初の回答</label><textarea id="answer" placeholder="今わかっている範囲で書いてください。">${esc(activeText)}</textarea><p class="tip">入力途中の文章はこのブラウザ内に自動保存されます。「次へ」を押すと回答が送信されます。</p><div class="btns"><button id="next" class="primary">回答を保存して追加情報へ →</button></div>`;
     }else if(step===2){
@@ -129,6 +144,7 @@
       done=true;cache();render();status('学習記録を送信しています…');await pending;
       status(saveFailed?'送信できなかった記録があります。担当の教員に連絡してください。':mode==='demo'?'デモ記録をブラウザに保存しました。':'学習記録を送信しました。',saveFailed);
     });
+    $('backHome')?.addEventListener('click',showHome);
     $('restart')?.addEventListener('click',()=>{if(confirm('新しい取り組みを始めますか？'))newSession(current);});
     if(localFailed)status('このブラウザ内への一時保存に失敗しています。',true);
     else if(saveFailed)status('学習記録の送信に失敗した履歴があります。担当の教員に連絡してください。',true);
@@ -166,14 +182,21 @@
         }
         participantCode=nextCode;
         try{if(nextCode)localStorage.setItem(PARTICIPANT_KEY,nextCode);else localStorage.removeItem(PARTICIPANT_KEY);}catch{}
-        newSession(current);
+        try{localStorage.removeItem(KEY);}catch{}
+        showHome();
         alert(nextCode?'参加コードを確認して設定しました。':'コードを解除して新しい取り組みを開始しました。');
       }finally{button.disabled=false;button.textContent='このコードを設定';}
     });
     window.CASES.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.title;$('caseSelect').appendChild(o);});
     $('caseSelect').addEventListener('change',e=>{
-      rememberInput();if(!confirm('別の事例で新しい取り組みを始めますか？ 現在の未完了の入力は、この画面から再開できなくなります。')){e.target.value=current.id;return;}
-      newSession(byId(e.target.value));
+      current=byId(e.target.value);
+      $('caseText').textContent=`${current.age}\n${current.description}`;
+    });
+    $('startCase').addEventListener('click',()=>{
+      if(!current){alert('事例を選択してください。');return;}
+      if(!confirm('この事例を開始しますか？ 回答と学習操作は記録されます。'))return;
+      newSession(current);
+      window.scrollTo({top:0,behavior:'instant'});
     });
     if(db){
       try{let {data:{session},error}=await db.auth.getSession();if(error)throw error;
@@ -195,12 +218,12 @@
     const saved=readCached();
     // 既存のV2の作業中セッションには研究用参加コードを後付けしない。
     // V3の新規セッションからコードを紐付ける。
-    if(saved&&(saved.schema===9)&&normalizeParticipantCode(saved.participantCode||'')===participantCode&&byId(saved.caseId)?.version===saved.caseVersion&&saved.userId===userId&&typeof saved.sessionId==='string'&&saved.step>=1&&saved.step<=6){
+    if(saved&&(saved.schema===10)&&normalizeParticipantCode(saved.participantCode||'')===participantCode&&byId(saved.caseId)?.version===saved.caseVersion&&saved.userId===userId&&typeof saved.sessionId==='string'&&saved.step>=1&&saved.step<=6){
       if(confirm(saved.done?'前回は課題を完了しています。前回の画面を表示しますか？（キャンセルすると新しい取り組みを開始）':'このブラウザに前回の入力途中の記録があります。続きを再開しますか？（キャンセルすると新しい取り組みを開始）')){
-        loadSaved(saved);render();status(saved.done?'前回の完了画面を表示しています。':'前回の入力内容を復元しました。');return;
+        loadSaved(saved);view='learning';showView();render();status(saved.done?'前回の完了画面を表示しています。':'前回の入力内容を復元しました。');return;
       }
     }
-    newSession(current);
+    showHome();
   }
   boot();
 })();

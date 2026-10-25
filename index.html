@@ -9,9 +9,32 @@
  <main class="wrap">
   <header><div><div class="eyebrow">保育者養成・事例検討</div><h1>事例を考える、考え直す</h1><p>子どもの行動を決めつけず、事実・可能性・環境から考えます。</p></div><span id="mode" class="mode">接続確認中</span></header>
   <div class="notice">これは教員による試作用教材です。<strong>研究利用の同意・大学の必要な手続き・保存先の安全性を確認するまで、実在する学生の回答や個人情報を入力しないでください。</strong></div>
-  <section class="panel"><label for="participantCode">研究用参加コード（試行時は任意）</label><div class="participant-row"><input id="participantCode" maxlength="12" autocomplete="off" placeholder="例：TEST001" aria-describedby="codeNote"><button id="applyParticipantCode" type="button">このコードを設定</button></div><p id="codeNote" class="tip">授業本番では教員が配布するランダムな英数字を使います。氏名・学籍番号・誕生日は入力しないでください。コードは本人認証ではありません。</p><label for="caseSelect">取り組む事例</label><select id="caseSelect"></select><div id="caseText" class="story"></div><details><summary>到達目標・課題の進め方・評価の観点（いつでも確認可能）</summary><p>到達目標：子どもの行動について、事実と推測を分け、本人・活動・環境から複数の可能性を考え、必要な確認と支援の検討を理由づけできる。</p><p>進め方：最初の考え → 追加情報の確認 → 必要に応じたヒントと最終回答 → 振り返り・解説・目標選択 → 別事例 → 自己確認。</p><p>評価の観点：<br>① 事実と推測を区別しているか<br>② 背景の複数の可能性を取り上げているか<br>③ 判断に必要な情報を具体的に挙げているか<br>④ 検討する対応とその根拠が具体的に示されているか</p><p>※ヒントを利用しても減点されません。必要に応じて活用し、よりよい回答を目指しましょう。</p></details></section>
-  <div class="steps" aria-label="学習段階"><span id="s1">1 最初の考え</span><span id="s2">2 追加情報</span><span id="s3">3 最終回答＋ヒント</span><span id="s4">4 解説・目標</span><span id="s5">5 別事例</span><span id="s6">6 自己確認</span></div>
-  <section id="stage" class="panel" aria-live="polite"></section>
+  <section id="home" class="home-shell">
+    <div class="home-hero panel">
+      <div class="hero-mark" aria-hidden="true">◈</div>
+      <p class="eyebrow">CASE STUDY · START</p>
+      <h2>今日の事例を選ぼう</h2>
+      <p>子どもの行動には、まだ見えていない背景があるかもしれません。まず自分で考え、情報を確かめ、必要なヒントを使いながら考え直してみましょう。</p>
+      <div class="home-chips"><span>6つのステップ</span><span>必要なヒントを選べる</span><span>正解探しではなく考える練習</span></div>
+    </div>
+    <section class="panel">
+      <h3>1　参加コードの設定</h3>
+      <label for="participantCode">研究用参加コード（試行時は任意）</label>
+      <div class="participant-row"><input id="participantCode" maxlength="12" autocomplete="off" placeholder="例：TEST001" aria-describedby="codeNote"><button id="applyParticipantCode" type="button">このコードを設定</button></div>
+      <p id="codeNote" class="tip">教員から配布されたコードを入力します。氏名・学籍番号・誕生日は入力しないでください。コード自体は本人認証ではありません。</p>
+      <h3>2　取り組む事例を選択</h3>
+      <label for="caseSelect">事例</label><select id="caseSelect"></select>
+      <div id="caseText" class="story"></div>
+      <details><summary>到達目標・評価の観点を確認する</summary><p>到達目標：子どもの行動について、事実と推測を分け、本人・活動・環境から複数の可能性を考え、必要な確認と支援の検討を理由づけできる。</p><p>① 事実と推測を区別しているか<br>② 背景の複数の可能性を取り上げているか<br>③ 判断に必要な情報を具体的に挙げているか<br>④ 検討する対応とその根拠が具体的に示されているか</p><p>ヒントを利用しても減点されません。必要に応じて活用してください。</p></details>
+      <div class="btns"><button id="startCase" class="primary start-button">この事例を始める →</button></div>
+    </section>
+  </section>
+  <section id="learning" hidden>
+    <div class="progress-wrap" aria-label="進み具合"><div class="progress-head"><span>事例に取り組む</span><strong id="progressText">STEP 1 / 6</strong></div><div class="progress-track"><div id="progressBar" class="progress-fill"></div></div></div>
+    <div class="steps" aria-label="学習段階"><span id="s1">1 最初の考え</span><span id="s2">2 追加情報</span><span id="s3">3 最終回答＋ヒント</span><span id="s4">4 解説・目標</span><span id="s5">5 別事例</span><span id="s6">6 自己確認</span></div>
+    <details class="case-context" open><summary>取り組んでいる事例：<span id="learningCaseTitle"></span></summary><div id="learningCaseText" class="story"></div></details>
+    <section id="stage" class="panel" aria-live="polite"></section>
+  </section>
   <footer>デモ版では保存先が未設定のとき、このブラウザ内にだけ仮保存されます。ブラウザの変更・履歴削除などで消えます。<br>教材の「ヒント」は大学生の課題遂行を支えるもので、事例の子どもへの支援と区別しています。</footer>
  </main>
  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
