@@ -17,6 +17,17 @@
   let mode = 'demo', pending = Promise.resolve(), saveFailed = false, localFailed = false;
   let stateStorageEnabled = true;
   let view = 'home';
+  let savedToResume = null;
+  function homeNotice(message, error=false){
+    let e=document.getElementById('homeNotice');
+    if(!e){e=document.createElement('p');e.id='homeNotice';e.setAttribute('role','status');e.className='status';document.getElementById('startCase').parentElement.before(e);}
+    e.textContent=message;e.className='status'+(error?' error':'');
+  }
+  function resumeOffer(){
+    let btn=document.getElementById('resumeCase');
+    if(!btn){btn=document.createElement('button');btn.id='resumeCase';btn.type='button';btn.textContent='前回の続きから再開';document.getElementById('startCase').before(btn);btn.addEventListener('click',()=>{if(!savedToResume)return;loadSaved(savedToResume);savedToResume=null;render();status(done?'前回の完了画面です。':'前回の入力内容を復元しました。');});}
+    btn.hidden=!savedToResume;
+  }
   const byId = x => window.CASES.find(c => c.id === x);
   // 全角英数字→半角、英字→大文字。内部の空白や異なる文字は混同しない。
   function normalizeParticipantCode(value){return String(value ?? '').normalize('NFKC').trim().toUpperCase();}
@@ -96,7 +107,7 @@
     document.body.scrollTop = 0;
     requestAnimationFrame(() => window.scrollTo(0, 0));
   }
-  function showHome(){view='home';showView();resetPageScroll();}
+  function showHome(){view='home';showView();resumeOffer();resetPageScroll();}
   function feedbackHtml(){
     const f=current.feedback||{}, notes=[];
     notes.push('追加の観察情報を確認しました。');
@@ -161,7 +172,7 @@
       status(saveFailed?'送信できなかった記録があります。担当の教員に連絡してください。':mode==='demo'?'デモ記録をブラウザに保存しました。':'学習記録を送信しました。',saveFailed);
     });
     $('backHome')?.addEventListener('click',showHome);
-    $('restart')?.addEventListener('click',()=>{if(confirm('新しい取り組みを始めますか？'))newSession(current);});
+    $('restart')?.addEventListener('click',()=>{newSession(current);});
     if(localFailed)status('このブラウザ内への一時保存に失敗しています。',true);
     else if(saveFailed)status('学習記録の送信に失敗した履歴があります。担当の教員に連絡してください。',true);
     else if(!done)status('入力途中はこのブラウザに自動保存され、回答を確定すると学習記録として送信されます。');
@@ -185,22 +196,19 @@
       const nextCode=normalizeParticipantCode($('participantCode').value);
       $('participantCode').value=nextCode;
       if(nextCode && !/^[A-Z0-9]{6,12}$/.test(nextCode)){
-        alert('研究用参加コードは半角英数字6～12文字で入力してください。小文字は大文字に変換されます。');
+        homeNotice('参加コードは半角英数字6～12文字で入力してください。小文字は大文字に変換されます。',true);
         $('participantCode').value=participantCode;return;
       }
-      if(nextCode===participantCode){alert('現在のコードと同じです。');return;}
+      if(nextCode===participantCode){homeNotice('現在設定中のコードと同じです。');return;}
       button.disabled=true;button.textContent='コードを確認中…';
       try{
         const result=await verifyCode(nextCode);
-        if(result!=='ok'){alert(explainCodeResult(result));$('participantCode').value=participantCode;return;}
-        if(!confirm('参加コードを変更すると、現在の課題を終了して新しい取り組みを開始します。よろしいですか？')){
-          $('participantCode').value=participantCode;return;
-        }
+        if(result!=='ok'){homeNotice(explainCodeResult(result),true);$('participantCode').value=participantCode;return;}
         participantCode=nextCode;
         try{if(nextCode)localStorage.setItem(PARTICIPANT_KEY,nextCode);else localStorage.removeItem(PARTICIPANT_KEY);}catch{}
         try{localStorage.removeItem(KEY);}catch{}
-        showHome();
-        alert(nextCode?'参加コードを確認して設定しました。':'コードを解除して新しい取り組みを開始しました。');
+        savedToResume=null;showHome();
+        homeNotice(nextCode?'参加コードを確認して設定しました。':'コードを解除しました。');
       }finally{button.disabled=false;button.textContent='このコードを設定';}
     });
     window.CASES.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.title;$('caseSelect').appendChild(o);});
@@ -209,9 +217,8 @@
       $('caseText').textContent=`${current.age}\n${current.description}`;
     });
     $('startCase').addEventListener('click',()=>{
-      if(!current){alert('事例を選択してください。');return;}
-      if(!confirm('この事例を開始しますか？ 回答と学習操作は記録されます。'))return;
-      newSession(current);
+      if(!current){homeNotice('事例を選択してください。',true);return;}
+      savedToResume=null;resumeOffer();newSession(current);
 
     });
     if(db){
@@ -228,16 +235,15 @@
         try{localStorage.removeItem(PARTICIPANT_KEY);}catch{}
         // 過去の同コードの入力途中記録を誤って復元させない。
         try{localStorage.removeItem(KEY);}catch{}
-        alert('保存済みコード '+old+' を確認できません。'+explainCodeResult(outcome)+' コードなしの新しい試用を開始します。');
+        homeNotice('保存済みコード '+old+' を確認できません。'+explainCodeResult(outcome)+' コードなしで事例を選択できます。',true);
       }
     }
     const saved=readCached();
     // 既存のV2の作業中セッションには研究用参加コードを後付けしない。
     // V3の新規セッションからコードを紐付ける。
     if(saved&&(saved.schema===10)&&normalizeParticipantCode(saved.participantCode||'')===participantCode&&byId(saved.caseId)?.version===saved.caseVersion&&saved.userId===userId&&typeof saved.sessionId==='string'&&saved.step>=1&&saved.step<=6){
-      if(confirm(saved.done?'前回は課題を完了しています。前回の画面を表示しますか？（キャンセルすると新しい取り組みを開始）':'このブラウザに前回の入力途中の記録があります。続きを再開しますか？（キャンセルすると新しい取り組みを開始）')){
-        loadSaved(saved);view='learning';showView();render();status(saved.done?'前回の完了画面を表示しています。':'前回の入力内容を復元しました。');return;
-      }
+      savedToResume=saved;
+      homeNotice(saved.done?'前回の完了画面を開く場合は「前回の続きから再開」を選んでください。':'前回の途中保存があります。「前回の続きから再開」から再開できます。');
     }
     showHome();
   }
