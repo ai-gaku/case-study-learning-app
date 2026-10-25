@@ -89,13 +89,20 @@
       $('participantCode').value=participantCode;
     }
   }
-  function showHome(){view='home';showView();}
+  function resetPageScroll(){
+    // 段階切替後、前画面のスクロール位置を引き継がない。
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    requestAnimationFrame(() => window.scrollTo(0, 0));
+  }
+  function showHome(){view='home';showView();resetPageScroll();}
   function feedbackHtml(){
     const f=current.feedback||{}, notes=[];
     notes.push('追加の観察情報を確認しました。');
     notes.push(viewed.size?`ヒントを${viewed.size}種類確認しました。`:'ヒントは利用せずに考えました。');
     const example=f.example||'現在の情報だけでは理由を断定できません。本人・活動・環境の情報を確認し、複数の可能性と対応の根拠を検討します。';
-    return `<div class="feedback"><h3>回答例（教員作成・一例）</h3><div class="saved">${esc(example)}</div><h3>なぜ、このように考えるのか</h3><p>${esc(f.main||'行動だけで結論を出さず、観察された事実と推測を分け、確認事項から対応を考えましょう。')}</p><h3>考える際に確認したい点</h3><ul>${(f.checks||[]).map(x=>`<li>${esc(x)}</li>`).join('')}</ul><p class="tip">回答例は唯一の正解ではありません。事実・可能性・必要な情報・対応の根拠が示されているか、自分の回答と比べてみてください。</p><h3>今回の学習過程</h3><p>${esc(notes.join(' '))}</p><p>閲覧履歴から回答の良し悪しを判定することはできません。自分の考えの変化を確かめてみましょう。</p></div>`;
+    return `<div class="feedback"><h3>まずは、考え方のポイントを確認</h3><p>以下の観点を手がかりに、自分の回答で取り上げられていたことを探してみましょう。<strong>すべてを長い文章で書く必要はありません。</strong></p><ul>${(f.checks||[]).map(x=>`<li>${esc(x)}</li>`).join('')}</ul><h3>詳しく書いた場合の回答例（教員作成）</h3><p class="tip"><strong>これは細かく丁寧にまとめた場合の一例です。</strong>同じ長さや表現で書くことを求めるものではありません。自分が考えられた視点を確認し、次に使えそうな視点を1つ見つけてみましょう。</p><div class="saved">${esc(example)}</div><h3>なぜ、このように考えるのか</h3><p>${esc(f.main||'行動だけで結論を出さず、観察された事実と推測を分け、確認事項から対応を考えましょう。')}</p><p class="tip">回答例は唯一の正解ではありません。状況や得られる情報によって判断は変わります。</p><h3>今回の学習過程</h3><p>${esc(notes.join(' '))}</p><p>閲覧履歴だけから回答の良し悪しは判定できません。自分の考えの変化を確かめてみましょう。</p></div>`;
   }
   const response = (title,content,open=false)=>`<details ${open?'open':''}><summary>${esc(title)}</summary><div class="saved">${esc(content||'（入力なし）')}</div></details>`;
   const focusOptions=()=>`<div class="choices">${focusChoices.map(c=>`<label class="choice"><input type="radio" name="nextFocus" value="${c.id}" ${nextFocus===c.id?'checked':''}>${esc(c.label)}</label>`).join('')}</div>`;
@@ -106,10 +113,10 @@
     }else if(step===1){
       html=`<h2>1. まず自分で考える</h2><p>${esc(current.prompts.initial)}</p><label for="answer">最初の回答</label><textarea id="answer" placeholder="今わかっている範囲で書いてください。">${esc(activeText)}</textarea><p class="tip">入力途中の文章はこのブラウザ内に自動保存されます。「次へ」を押すと回答が送信されます。</p><div class="btns"><button id="next" class="primary">回答を保存して追加情報へ →</button></div>`;
     }else if(step===2){
-      html=`<h2>2. 追加の観察情報を確認する</h2><p>ここからは全員が確認する情報です。最初の事例と比べ、考え直す必要がある点や、まだ分からない点を探してみましょう。</p>${response('自分の最初の回答',initial)}<div class="story"><strong>追加の観察情報</strong><p>${esc(current.extra)}</p></div><label for="gapNote">この情報を見ても、まだ判断できないことは？（任意）</label><textarea id="gapNote" rows="3" placeholder="例：本人が説明を理解できていたかどうか">${esc(gapNote)}</textarea><div class="btns"><button id="next" class="primary">確認して最終回答へ →</button></div>`;
+      html=`<h2>2. 追加の観察情報を確認する</h2><p>以下の追加情報を確認してください。最初の事例と比べ、考え直す必要がある点や、まだ分からない点を探してみましょう。</p>${response('自分の最初の回答',initial)}<div class="story"><strong>追加の観察情報</strong><p>${esc(current.extra)}</p></div><label for="gapNote">この情報を見ても、まだ判断できないことは？（任意）</label><textarea id="gapNote" rows="3" placeholder="例：本人が説明を理解できていたかどうか">${esc(gapNote)}</textarea><div class="btns"><button id="next" class="primary">確認して最終回答へ →</button></div>`;
     }else if(step===3){
       html=`<h2>3. ヒントを使いながら最終回答する</h2><p>${esc(current.prompts.final)}</p><p class="tip">必要だと思ったときにヒントを選んで開けます。ヒントを使っても減点されません。</p><div class="review">${response('最初の回答を見返す',initial)}${response('追加の観察情報を見返す',current.extra)}${gapNote?response('まだ判断できないことのメモ',gapNote):''}</div><h3>考えるためのヒント（任意）</h3>`;
-      current.hints.forEach(h=>{html+=`<div class="hint"><strong>${esc(h.title)}</strong><span class="tag">${esc(h.type)}</span>${viewed.has(h.id)?`<details><summary>ヒントを見返す（表示／非表示）</summary><p>${esc(h.text)}</p></details>`:`<div class="btns"><button type="button" data-hint="${esc(h.id)}">このヒントを見る</button></div>`}</div>`;});
+      current.hints.forEach(h=>{html+=`<details class="hint" data-hint-id="${esc(h.id)}"><summary>${esc(h.title)} <span class="tag">${esc(h.type)}</span></summary><p>${esc(h.text)}</p></details>`;});
       html+=`<label for="answer">最終回答</label><textarea id="answer" placeholder="追加情報や必要なヒントを参考に、判断とその理由をまとめましょう。">${esc(activeText)}</textarea><div class="btns"><button id="back">← 追加情報に戻る</button><button id="next" class="primary">最終回答を保存して振り返る →</button></div>`;
     }else if(step===4){
       if(!feedbackOpen){
@@ -123,6 +130,7 @@
       html=`<h2>6. 別事例での取り組みを確かめる</h2><p>選んだ視点を実際に意識できたか、自分の回答を見ながら振り返りましょう。</p><div class="focus-box"><strong>意識すると決めた視点</strong><p>${esc(focusLabel(nextFocus))}</p></div>${response('別事例への自分の回答',transfer,true)}<h3>選んだ視点を、別事例で意識できましたか？</h3><div class="choices">${[{id:'yes',label:'意識して考えることができた'},{id:'partly',label:'意識したが、十分には考えられなかった'},{id:'no',label:'考えるときに忘れていた・難しかった'}].map(c=>`<label class="choice"><input type="radio" name="transferCheck" value="${c.id}" ${transferCheck===c.id?'checked':''}>${c.label}</label>`).join('')}</div><p class="tip">これは自己確認です。回答の良し悪しを自動採点するものではありません。</p><div class="btns"><button id="complete" class="primary">自己確認を記録して完了する</button></div>`;
     }
     $('stage').innerHTML=html+'<p id="status" class="status" role="status"></p>';
+    resetPageScroll();
     $('answer')?.addEventListener('input',rememberInput);
     $('gapNote')?.addEventListener('input',e=>{gapNote=e.target.value;cache();});
     $('next')?.addEventListener('click',next);
@@ -130,7 +138,15 @@
       rememberInput();if(step===3){step=2;activeText='';}else if(step===4&&!feedbackOpen){step=3;activeText=final;}
       cache();render();
     });
-    document.querySelectorAll('[data-hint]').forEach(btn=>btn.addEventListener('click',()=>{const id=btn.dataset.hint;if(!viewed.has(id)){viewed.add(id);log('hint_open',{hint_id:id});}rememberInput();render();}));
+    document.querySelectorAll('details[data-hint-id]').forEach(panel=>panel.addEventListener('toggle',()=>{
+      if(!panel.open)return;
+      const id=panel.dataset.hintId;
+      if(!viewed.has(id)){
+        viewed.add(id);
+        log('hint_open',{hint_id:id});
+        rememberInput();
+      }
+    }));
     document.querySelectorAll('input[name="nextFocus"]').forEach(r=>r.addEventListener('change',e=>{nextFocus=e.target.value;cache();}));
     document.querySelectorAll('input[name="transferCheck"]').forEach(r=>r.addEventListener('change',e=>{transferCheck=e.target.value;cache();}));
     $('toTransfer')?.addEventListener('click',()=>{
@@ -196,7 +212,7 @@
       if(!current){alert('事例を選択してください。');return;}
       if(!confirm('この事例を開始しますか？ 回答と学習操作は記録されます。'))return;
       newSession(current);
-      window.scrollTo({top:0,behavior:'instant'});
+
     });
     if(db){
       try{let {data:{session},error}=await db.auth.getSession();if(error)throw error;
